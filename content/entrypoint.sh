@@ -4,32 +4,15 @@
 #
 # env |grep vpn_ | while read line; do echo $line| cut -d= -f2- >> /etc/ipsec.d/secrets.local.conf ; done
 
-INTERFACE=${IPTABLES_INTERFACE:+-i ${IPTABLES_INTERFACE}}
-ENDPOINTS=${IPTABLES_ENDPOINTS:+-s ${IPTABLES_ENDPOINTS}}
-#RIGHTSUBNET=$(grep rightsubnet /etc/ipsec.docker/ipsec.gc.conf  | cut -d"=" -f2)
-
 # add iptables rules if IPTABLES=true
-if [[ x${IPTABLES} == 'xtrue' ]]; then
-  iptables -I INPUT ${INTERFACE} -p esp -j ACCEPT
-  iptables -I INPUT ${ENDPOINTS} ${INTERFACE} -p udp -m udp --sport 500 --dport 500 -j ACCEPT
-  iptables -I INPUT ${ENDPOINTS} ${INTERFACE} -p udp -m udp --sport 4500 --dport 4500 -j ACCEPT
-  iptables -t nat -I POSTROUTING -m policy --dir out --pol ipsec -j ACCEPT
-#  iptables -t nat -I POSTROUTING -s ${RIGHTSUBNET} -j ACCEPT
-fi
+  iptables -t nat -A POSTROUTING -s 10.11.0.0/16 -o eth0 -j MASQUERADE
+  iptables -A FORWARD -s 10.11.0.0/16 -o eth0 -p tcp -m tcp --tcp-flags SYN,RST SYN -m tcpmss --mss 1361:1536 -j TCPMSS --set-mss 1360
 
 _revipt() {
-  if [[ x${IPTABLES} == 'xtrue' ]]; then
     echo "Removing iptables rules..."
-    iptables -D INPUT ${INTERFACE} -p esp -j ACCEPT
-    iptables -D INPUT ${ENDPOINTS} ${INTERFACE} -p udp -m udp --sport 500 --dport 500 -j ACCEPT
-    iptables -D INPUT ${ENDPOINTS} ${INTERFACE} -p udp -m udp --sport 4500 --dport 4500 -j ACCEPT
-    iptables -t nat -D POSTROUTING -m policy --dir out --pol ipsec -j ACCEPT
-#    iptables -t nat -D POSTROUTING -s ${RIGHTSUBNET} -j ACCEPT
-  fi
+    iptables -t nat -D POSTROUTING -s 10.11.0.0/16 -o eth0 -j MASQUERADE
+    iptables -D FORWARD -s 10.11.0.0/16 -o eth0 -p tcp -m tcp --tcp-flags SYN,RST SYN -m tcpmss --mss 1361:1536 -j TCPMSS --set-mss 1360
 }
-
-# enable ip forward
-sysctl -w net.ipv4.ip_forward=1
 
 # function to use when this script recieves a SIGTERM.
 _term() {
@@ -42,6 +25,10 @@ _term() {
 
 # catch the SIGTERM
 trap _term SIGTERM
+
+echo "Copying certs and privkeys..."
+cp /etc/ipsec.docker/ipsec.d/certs/fullchain.pem /etc/ipsec.d/certs/
+cp /etc/ipsec.docker/ipsec.d/private/privkey.pem /etc/ipsec.d/private/
 
 echo "Starting strongSwan/ipsec..."
 ipsec start --nofork "$@" &
